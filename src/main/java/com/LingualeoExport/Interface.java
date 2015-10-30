@@ -9,7 +9,9 @@ public class Interface extends InputReader {
     Interface(String path, String encode){
         readFile(path, encode);
         // TODO допилить ввод имейло-пароля
-        Reciever reciever = new Reciever("holypics3@gmail.com", "LoveJava", getWordsMap());
+        for(int i = 1; i < 6; i++){
+            Reciever reciever = new Reciever("holypics4@gmail.com", "LoveJava", getWordsMap(), i);
+        }
     }
 
     public void readFile(String path, String encode){
