@@ -10,34 +10,38 @@ import org.apache.http.impl.client.HttpClients;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.util.Iterator;
 import java.util.Map;
 import java.util.Set;
 import java.util.logging.Logger;
 
-public class Reciever {
+public class Reciever implements Runnable {
     public static Logger log = Logger.getLogger(InputReader.class.getName());
     String email;
     String password;
-    //private String responseString;
+    Map<String, Integer> wordsMap;
+    Thread thread;
     private String actualCookie;
 
-    Reciever(String email, String password, Map<String, Integer> wordsMap){
+    Reciever(String email, String password, Map<String, Integer> wordsMap, int count){
         this.email = email;
         this.password = password;
-
+        this.wordsMap = wordsMap;
+        String s = "Reciever thread - " + count;
+        thread = new Thread(this, s);
+        thread.start();
+    }
+    @Override
+    public void run(){
         String responseString = init();
         actualCookie = cookieStringer(responseString);
-
-        sendWordsFromMap(wordsMap);
-
-
+        sendWordsFromMap();
     }
     private String init(){
         CloseableHttpClient httpClient = HttpClients.createMinimal();
         HttpGet httpGet = new HttpGet("http://lingualeo.com/api/login?email="+email+"&password="+password);
         addHeaders(httpGet, true, null);
         CloseableHttpResponse httpResponse = null;
-        // Обработка ошибок... господеиисусе...
         try {
             httpResponse = httpClient.execute(httpGet);
             return httpResponse.toString();
@@ -56,20 +60,9 @@ public class Reciever {
                 log.info("Something gone wrong. httpClient or httpResponse throw IOException.");
                 e.printStackTrace();
             }
-
         }
         return null;
     }
-
-    /*
-    Доподлено неизвестно, как ведёт себя сервер лигвалео на той стороне. На пустой гет он даже куку не пришлёт. Потому имитирую браузер, как умею.
-    Параметры на входе:
-    httpGet - понятно,
-    логический isThisAuth - "авторизация ли это". В зависимости от этого, определяется заголовок Host в запросе:
-        api.lingualeo.com - в случае уже пройденной авторизации
-        lingualeo.com - ещё не пройденная авторизация
-    cookieString - костыль, в котором передаётся уже готовая строка куков. Это нужно, чтобы добавить её как заголовок. Если это авторизация - передать можно что угодно, т.к. будет пропущено. Потому нуль.
-    */
     private void addHeaders(HttpGet httpGet, boolean isThisAuth, String cookieString){
         if (!isThisAuth){
             httpGet.addHeader("Host", "api.lingualeo.com");
@@ -86,7 +79,6 @@ public class Reciever {
         }
         httpGet.addHeader("Connection", "keep-alive");
     }
-    // Сборка параметра для заголовка кук
     private String cookieStringer(String responseString){
         StringBuilder stringBuilder = new StringBuilder("servid=");
         stringBuilder.append(extract(responseString, "servid=", ";"));
@@ -110,39 +102,57 @@ public class Reciever {
         if(e < 0) e = str.length();
         return (str.substring(s, e).trim());
     }
-    private void sendWordsFromMap(Map<String, Integer> wordsMap){
-        Set<Map.Entry<String, Integer>> EntrySet = InputReader.wordsMap.entrySet();
-        for(Map.Entry<String, Integer> pair : EntrySet){
-            // достаём слова
-            CloseableHttpClient httpClientForWords = HttpClients.createMinimal();
-            HttpGet httpGetForWords = new HttpGet();
-            addHeaders(httpGetForWords, false, actualCookie);
-            try {
-                addword(pair.getKey(), httpClientForWords, httpGetForWords);
-            // господеиисусе опять эти обработки исключений
-            } catch (URISyntaxException e) {
-                log.info("URISyntaxException. May be Syntax-error in a word?");
-                e.printStackTrace();
-            } catch (IOException e) {
-                log.info("IOException.");
-                e.printStackTrace();
-            } catch (InterruptedException e) {
-                log.info("InterruptedException");
-                e.printStackTrace();
-            }finally {
+    private synchronized String getWordFromMap(){
+        if(wordsMap.isEmpty()){
+            log.info("map is empty");
+            return null;
+        }
+        Iterator<Map.Entry<String, Integer>> iter = this.wordsMap.entrySet().iterator();
+        if(iter.hasNext()){
+            Map.Entry<String, Integer> entry = iter.next();
+            String s = entry.getKey();
+            iter.remove();
+            return s;
+        }
+        return null;
+    }
+    private void sendWordsFromMap(){
+        boolean b = true;
+        String word;
+        while(b){
+            word = getWordFromMap();
+            if(null == word){
+                b = false;
+            }else{CloseableHttpClient httpClientForWords = HttpClients.createMinimal();
+                HttpGet httpGetForWords = new HttpGet();
+                addHeaders(httpGetForWords, false, actualCookie);
                 try {
-                    httpClientForWords.close();
-                } catch (IOException e) {
-                    log.info("IOException in httpClientForWords.close()");
+                    addword(word, httpClientForWords, httpGetForWords);
+                } catch (URISyntaxException e) {
+                    log.info("URISyntaxException. May be Syntax-error in a word?");
                     e.printStackTrace();
+                } catch (IOException e) {
+                    log.info("IOException.");
+                    e.printStackTrace();
+                } catch (InterruptedException e) {
+                    log.info("InterruptedException");
+                    e.printStackTrace();
+                }finally {
+                    try {
+                        httpClientForWords.close();
+                    } catch (IOException e) {
+                        log.info("IOException in httpClientForWords.close()");
+                        e.printStackTrace();
+                    }
                 }
             }
         }
     }
-    protected static void addword(String word, HttpClient httpClient, HttpGet httpGet) throws URISyntaxException, IOException, InterruptedException {
+    protected void addword(String word, HttpClient httpClient, HttpGet httpGet) throws URISyntaxException, IOException, InterruptedException {
         URI uri = new URI("http://api.lingualeo.com/addword?word="+ word);
         httpGet.setURI(uri);
         HttpResponse response = httpClient.execute(httpGet);
-        System.out.println(word + " - " + response.getStatusLine().getStatusCode());
+        System.out.println(word + " - " + response.getStatusLine().getStatusCode() + " - " + thread);
     }
+
 }
